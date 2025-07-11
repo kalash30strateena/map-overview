@@ -8,7 +8,7 @@
   <style>
     html, body { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; }
     body, #main-layout { height: 100vh; width: 100vw; overflow: hidden; }
-    #folder-controls { width: 100vw; padding: 12px 10px 0 10px; background: #fff; z-index: 1001; position: relative; box-sizing: border-box; border-bottom: 1px solid #eee; }
+    #folder-controls { width: 100vw; padding: 12px 10px 0 170px; background: #fff; z-index: 1001; position: relative; box-sizing: border-box; border-bottom: 1px solid #eee; }
     #folder-controls button,
     #file-controls button {
       margin-right: 10px;
@@ -47,7 +47,28 @@
     #file-controls { display: flex; flex-direction: column; gap: 8px; width: 100%; }
     #flood-filters { margin-top: 18px; margin-bottom: 10px; display: none; }
     #flood-filters label { font-weight: bold; color: #800000; margin-bottom: 5px; display: block; }
-    #flood-filters input[type="checkbox"] { margin-right: 4px; }
+    #flood-filters input[type="checkbox"] { 
+      margin-right: 4px;
+      accent-color: black;
+    }
+    .flood-label {
+      font-weight: normal;
+      color: #333;
+      transition: color 0.2s, font-weight 0.2s;
+      cursor: pointer;
+    }
+    .flood-label.checked-slight {
+      color: #00c1ff;
+      font-weight: bold;
+    }
+    .flood-label.checked-moderate {
+      color: #1166bd;
+      font-weight: bold;
+    }
+    .flood-label.checked-critical {
+      color: #012142;
+      font-weight: bold;
+    }
     #map { flex: 1 1 0%; position: relative; height: 100%; width: 100%; z-index: 1; }
     #info-panel { display: none; position: relative; width: 370px; min-width: 180px; height: 100%; overflow-y: auto; background: rgba(255,255,255,0.98); border-left: 1px solid #eee; z-index: 9999; padding: 30px 18px 18px 18px; font-family: Arial, sans-serif; transition: box-shadow 0.2s; box-shadow: 0 0 24px rgba(0,0,0,0.10); }
     #info-panel h3 { margin-top: 0; font-size: 20px; margin-bottom: 12px; color: #3388ff; }
@@ -64,7 +85,13 @@
       #map { width: 100vw; height: 50vh; min-height: 250px; }
       #info-panel { width: 100vw; left: 0; right: 0; border-left: none; border-top: 1px solid #eee; box-shadow: 0 -4px 24px rgba(0,0,0,0.10); padding: 18px 10px 10px 10px; height: 50vh; top: auto; bottom: 0; }
     }
-  </style>
+
+    /* Add this at the end */
+    #flood-filters input[type="checkbox"]:checked + .flood-label {
+      text-decoration: underline;
+    }
+</style>
+
 </head>
 <body>
   <div id="folder-controls"></div>
@@ -76,9 +103,12 @@
       <div id="file-controls"></div>
       <div id="flood-filters">
         <label>Incidence Level:</label>
-        <input type="checkbox" name="incidence" value="1" onchange="drawFloodMap()" checked> Slight<br>
-        <input type="checkbox" name="incidence" value="2" onchange="drawFloodMap()" checked> Moderate<br>
-        <input type="checkbox" name="incidence" value="3" onchange="drawFloodMap()" checked> Criticism<br>
+        <input type="checkbox" id="flood-slight" name="incidence" value="1" onchange="drawFloodMap();updateFloodLabels()" checked>
+        <span class="flood-label" id="label-slight">Slight</span><br>
+        <input type="checkbox" id="flood-moderate" name="incidence" value="2" onchange="drawFloodMap();updateFloodLabels()" checked>
+        <span class="flood-label" id="label-moderate">Moderate</span><br>
+        <input type="checkbox" id="flood-critical" name="incidence" value="3" onchange="drawFloodMap();updateFloodLabels()" checked>
+        <span class="flood-label" id="label-critical">Criticism</span><br>
       </div>
     </div>
     <div id="map"></div>
@@ -129,6 +159,7 @@
       ],
     };
 
+
     const defaultStyle = {
       radius: 6,
       color: '#3388ff',
@@ -152,6 +183,7 @@
       }
     }
 
+
     let lastClickedMarker = null;
     let lastHoveredMarker = null;
     let currentFolder = null;
@@ -159,13 +191,13 @@
     let currentFloodIncidenceKey = null;
     let currentFloodData = [];
     let allData = {};
-
-    // --- Add these for selection memory ---
     let lastSelectedProvince = null;
     let lastSelectedDepartment = null;
 
+
     const provinceSelectId = 'province-select';
     const departmentSelectId = 'department-select';
+
 
     var map = L.map('map').setView([-38.4161, -63.6167], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -173,6 +205,7 @@
       maxZoom: 18,
     }).addTo(map);
     var dotsLayer = L.layerGroup().addTo(map);
+
 
     function renderFolderButtons() {
       const folderDiv = document.getElementById('folder-controls');
@@ -190,6 +223,7 @@
         folderDiv.appendChild(btn);
       });
     }
+
 
     function renderFileButtons(folder) {
       const fileDiv = document.getElementById('file-controls');
@@ -209,6 +243,7 @@
       document.getElementById('flood-filters').style.display = (folder === "Floods") ? "block" : "none";
       if (folder === "Floods") {
         document.querySelectorAll('#flood-filters input[type="checkbox"]').forEach(cb => cb.checked = true);
+        updateFloodLabels();
       }
       if(!currentFile && folderStructure[folder].length > 0) {
         currentFile = folderStructure[folder][0];
@@ -216,6 +251,7 @@
         loadProvinceCSV(currentFile, folder);
       }
     }
+
 
     function showInfoPanel(row) {
       const infoPanel = document.getElementById('info-panel');
@@ -231,6 +267,7 @@
       infoPanel.style.display = 'block';
     }
 
+
     function hideInfoPanel() {
       document.getElementById('info-panel').style.display = 'none';
       if (lastClickedMarker) {
@@ -238,6 +275,7 @@
         lastClickedMarker = null;
       }
     }
+
 
     function removeProvinceSelect() {
       document.getElementById('province-select-container').innerHTML = '';
@@ -248,6 +286,7 @@
       document.getElementById('department-select-container').innerHTML = '';
     }
 
+
     function loadProvinceCSV(file, type) {
       dotsLayer.clearLayers();
       document.getElementById('info-panel').style.display = 'none';
@@ -255,6 +294,7 @@
       lastHoveredMarker = null;
       removeProvinceSelect();
       removeDepartmentSelect();
+
 
       fetch(file)
         .then(response => {
@@ -272,12 +312,14 @@
                 currentFloodData = data;
                 currentFloodIncidenceKey = results.meta.fields.find(h => h.toLowerCase().includes("nivel de incidencia"));
                 document.getElementById('flood-filters').style.display = currentFloodIncidenceKey ? "block" : "none";
+                updateFloodLabels();
               }
+
 
               let provinces = [...new Set(data.map(r => r['Nombre de provincia']).filter(p => p))].sort();
               renderProvinceSelect(provinces, type, data);
 
-              // 👉 now safe to trigger drawFloodMap after incidence key is set
+
               if (type === "Floods") {
                 drawFloodMap();
               }
@@ -290,7 +332,7 @@
         });
     }
 
-    // --- Province selection with memory ---
+
     function renderProvinceSelect(provinces, type, dataArr) {
       let provinceContainer = document.getElementById('province-select-container');
       provinceContainer.innerHTML = '';
@@ -298,11 +340,13 @@
       departmentContainer.innerHTML = '';
       if (!provinces || provinces.length === 0) return;
 
+
       let label = document.createElement('label');
       label.setAttribute('for', provinceSelectId);
       label.textContent = 'Provincia:';
       label.style.fontWeight = 'bold';
       label.style.color = '#800000';
+
 
       let select = document.createElement('select');
       select.id = provinceSelectId;
@@ -317,35 +361,36 @@
         select.appendChild(option);
       });
 
-      // Try to preserve last province selection if it exists
+
       let selectedProvinceIndex = 0;
       if (lastSelectedProvince && provinces.includes(lastSelectedProvince)) {
         selectedProvinceIndex = provinces.indexOf(lastSelectedProvince);
       } else {
-        // Optionally, auto-select Formosa if present
         let formosaIdx = provinces.findIndex(p => p.trim().toLowerCase() === 'formosa');
         if (formosaIdx !== -1) selectedProvinceIndex = formosaIdx;
       }
       select.selectedIndex = selectedProvinceIndex;
       lastSelectedProvince = provinces[selectedProvinceIndex];
 
+
       select.onchange = function() {
         lastSelectedProvince = this.value;
-        lastSelectedDepartment = null; // Reset department when province changes
+        lastSelectedDepartment = null;
         renderDepartmentSelect(this.value, type, dataArr);
       };
       provinceContainer.appendChild(label);
       provinceContainer.appendChild(select);
 
+
       renderDepartmentSelect(lastSelectedProvince, type, dataArr);
     }
 
-    // --- Department selection with memory ---
+
     function renderDepartmentSelect(province, type, dataArr) {
       let departmentContainer = document.getElementById('department-select-container');
       departmentContainer.innerHTML = '';
 
-      // Dynamic department column detection
+
       let deptCol = Object.keys(dataArr[0] || {}).find(
         k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
       );
@@ -353,11 +398,13 @@
         ? [...new Set(dataArr.filter(r => r['Nombre de provincia'] === province).map(r => r[deptCol]).filter(d => d))].sort()
         : [];
 
+
       let label = document.createElement('label');
       label.setAttribute('for', departmentSelectId);
       label.textContent = 'Departament:';
       label.style.fontWeight = 'bold';
       label.style.color = '#800000';
+
 
       let select = document.createElement('select');
       select.id = departmentSelectId;
@@ -366,10 +413,12 @@
       select.style.width = '100%';
       select.style.fontSize = '15px';
 
+
       let allOption = document.createElement('option');
       allOption.value = '';
       allOption.textContent = 'Todos';
       select.appendChild(allOption);
+
 
       departments.forEach(dept => {
         let option = document.createElement('option');
@@ -378,13 +427,14 @@
         select.appendChild(option);
       });
 
-      // Try to preserve last department selection if it exists
+
       let selectedDepartmentIndex = 0;
       if (lastSelectedDepartment && departments.includes(lastSelectedDepartment)) {
-        selectedDepartmentIndex = departments.indexOf(lastSelectedDepartment) + 1; // +1 for 'Todos' option
+        selectedDepartmentIndex = departments.indexOf(lastSelectedDepartment) + 1;
       }
       select.selectedIndex = selectedDepartmentIndex;
       lastSelectedDepartment = select.value;
+
 
       select.onchange = function() {
         lastSelectedDepartment = this.value;
@@ -393,21 +443,28 @@
       departmentContainer.appendChild(label);
       departmentContainer.appendChild(select);
 
+
       drawProvinceMap(province, select.value, type, dataArr);
     }
 
+
+    // --------- MODIFIED FUNCTION BELOW ----------
     function drawProvinceMap(province, department, type, dataArr) {
       dotsLayer.clearLayers();
       document.getElementById('info-panel').style.display = 'none';
       lastClickedMarker = null;
       lastHoveredMarker = null;
 
+      let deptCol = Object.keys(dataArr[0] || {}).find(
+        k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
+      );
+
+      // Filtered for province
+      let filteredProvinceData = dataArr.filter(r => r['Nombre de provincia'] === province);
+      // Filtered for department (if selected)
       let filteredData;
       if (type === "Floods") {
-        let deptCol = Object.keys(dataArr[0] || {}).find(
-          k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
-        );
-        filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
+        filteredData = filteredProvinceData;
         if (deptCol && department && department !== '') {
           filteredData = filteredData.filter(r => r[deptCol] === department);
         }
@@ -416,10 +473,7 @@
           filteredData = filteredData.filter(row => checked.includes(row[currentFloodIncidenceKey]));
         }
       } else {
-        let deptCol = Object.keys(dataArr[0] || {}).find(
-          k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
-        );
-        filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
+        filteredData = filteredProvinceData;
         if (deptCol && department && department !== '') {
           filteredData = filteredData.filter(r => r[deptCol] === department);
         }
@@ -478,29 +532,99 @@
         }
       });
 
-      if (bounds.length > 0) {
-        const latLngBounds = L.latLngBounds(bounds);
-        const zoomOutDelta = 3; // Increase to zoom out more, decrease to zoom out less
-        const targetZoom = map.getBoundsZoom(latLngBounds) - zoomOutDelta;
-        const center = latLngBounds.getCenter();
-        map.setView(center, targetZoom);
+      // ----------- ZOOM LOGIC MODIFIED -----------
+      // If department selected and has >10 points, zoom to department
+      // If department selected and <=10 points, zoom to province
+      // If no department selected, zoom to province
+
+      if (department && department !== '') {
+        if (filteredData.length > 10) {
+          // Zoom to department bounds
+          if (bounds.length > 0) {
+            const latLngBounds = L.latLngBounds(bounds);
+            const zoomOutDelta = 1;
+            const targetZoom = map.getBoundsZoom(latLngBounds) - zoomOutDelta;
+            const center = latLngBounds.getCenter();
+            map.setView(center, targetZoom);
+          }
+        } else {
+          // Zoom to province bounds (use filteredProvinceData)
+          let provinceBounds = [];
+          filteredProvinceData.forEach(row => {
+            let lat = parseFloat(row['Latitud del centroide'] || row['latitude'] || row['lat']);
+            let lng = parseFloat(row['Longitud del centroide'] || row['longitude'] || row['lon']);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              provinceBounds.push([lat, lng]);
+            }
+          });
+          if (provinceBounds.length > 0) {
+            const latLngBounds = L.latLngBounds(provinceBounds);
+            const zoomOutDelta = 1;
+            const targetZoom = map.getBoundsZoom(latLngBounds) - zoomOutDelta;
+            const center = latLngBounds.getCenter();
+            map.setView(center, targetZoom);
+          }
+        }
+      } else {
+        // No department selected, zoom to province
+        if (bounds.length > 0) {
+          const latLngBounds = L.latLngBounds(bounds);
+          const zoomOutDelta = 1;
+          const targetZoom = map.getBoundsZoom(latLngBounds) - zoomOutDelta;
+          const center = latLngBounds.getCenter();
+          map.setView(center, targetZoom);
+        }
       }
     }
+    // --------- END MODIFIED FUNCTION ----------
 
     function drawFloodMap() {
-      // Use current province/department selection
       let provinceSelect = document.getElementById(provinceSelectId);
       let departmentSelect = document.getElementById(departmentSelectId);
       let province = provinceSelect ? provinceSelect.value : '';
       let department = departmentSelect ? departmentSelect.value : '';
       drawProvinceMap(province, department, "Floods", allData["Floods"] || []);
+      updateFloodLabels();
     }
+
+
+    function updateFloodLabels() {
+      var cbSlight = document.getElementById('flood-slight');
+      var lblSlight = document.getElementById('label-slight');
+      if (cbSlight && lblSlight) {
+        if (cbSlight.checked) {
+          lblSlight.classList.add('checked-slight');
+        } else {
+          lblSlight.classList.remove('checked-slight');
+        }
+      }
+      var cbModerate = document.getElementById('flood-moderate');
+      var lblModerate = document.getElementById('label-moderate');
+      if (cbModerate && lblModerate) {
+        if (cbModerate.checked) {
+          lblModerate.classList.add('checked-moderate');
+        } else {
+          lblModerate.classList.remove('checked-moderate');
+        }
+      }
+      var cbCritical = document.getElementById('flood-critical');
+      var lblCritical = document.getElementById('label-critical');
+      if (cbCritical && lblCritical) {
+        if (cbCritical.checked) {
+          lblCritical.classList.add('checked-critical');
+        } else {
+          lblCritical.classList.remove('checked-critical');
+        }
+      }
+    }
+
 
     window.onload = function() {
       currentFolder = Object.keys(folderStructure)[0];
       currentFile = null;
       renderFolderButtons();
       renderFileButtons(currentFolder);
+      updateFloodLabels();
     };
   </script>
 </body>

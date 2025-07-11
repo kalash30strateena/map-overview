@@ -76,9 +76,9 @@
       <div id="file-controls"></div>
       <div id="flood-filters">
         <label>Incidence Level:</label>
-        <input type="checkbox" name="incidence" value="1" onchange="drawFloodMap()"> Slight<br>
-        <input type="checkbox" name="incidence" value="2" onchange="drawFloodMap()"> Moderate<br>
-        <input type="checkbox" name="incidence" value="3" onchange="drawFloodMap()"> Criticism<br>
+        <input type="checkbox" name="incidence" value="1" onchange="drawFloodMap()" checked> Slight<br>
+        <input type="checkbox" name="incidence" value="2" onchange="drawFloodMap()" checked> Moderate<br>
+        <input type="checkbox" name="incidence" value="3" onchange="drawFloodMap()" checked> Criticism<br>
       </div>
     </div>
     <div id="map"></div>
@@ -145,10 +145,10 @@
     };
     function getFloodColor(level) {
       switch (String(level)) {
-        case "1": return "#add8e6";
-        case "2": return "#3399ff";
-        case "3": return "#003f7f";
-        default: return "#888";
+        case "1": return "#00c1ff"; // Slight
+        case "2": return "#1166bd"; // Moderate
+        case "3": return "#012142"; // Criticism
+        default: return "#888"; // fallback
       }
     }
 
@@ -158,11 +158,14 @@
     let currentFile = null;
     let currentFloodIncidenceKey = null;
     let currentFloodData = [];
+    let allData = {};
 
-    // Province/Department selection data
+    // --- Add these for selection memory ---
+    let lastSelectedProvince = null;
+    let lastSelectedDepartment = null;
+
     const provinceSelectId = 'province-select';
     const departmentSelectId = 'department-select';
-    let allData = {};
 
     var map = L.map('map').setView([-38.4161, -63.6167], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -204,9 +207,8 @@
         fileDiv.appendChild(btn);
       });
       document.getElementById('flood-filters').style.display = (folder === "Floods") ? "block" : "none";
-      if (!Object.keys(folderStructure).includes(folder)) {
-        removeProvinceSelect();
-        removeDepartmentSelect();
+      if (folder === "Floods") {
+        document.querySelectorAll('#flood-filters input[type="checkbox"]').forEach(cb => cb.checked = true);
       }
       if(!currentFile && folderStructure[folder].length > 0) {
         currentFile = folderStructure[folder][0];
@@ -266,13 +268,18 @@
             complete: function(results) {
               let data = results.data;
               allData[type] = data;
-              let provinces = [...new Set(data.map(r => r['Nombre de provincia']).filter(p => p))].sort();
-              renderProvinceSelect(provinces, type, data);
               if (type === "Floods") {
-                // For floods, also store the data for incidence filtering
                 currentFloodData = data;
                 currentFloodIncidenceKey = results.meta.fields.find(h => h.toLowerCase().includes("nivel de incidencia"));
                 document.getElementById('flood-filters').style.display = currentFloodIncidenceKey ? "block" : "none";
+              }
+
+              let provinces = [...new Set(data.map(r => r['Nombre de provincia']).filter(p => p))].sort();
+              renderProvinceSelect(provinces, type, data);
+
+              // 👉 now safe to trigger drawFloodMap after incidence key is set
+              if (type === "Floods") {
+                drawFloodMap();
               }
             }
           });
@@ -283,6 +290,7 @@
         });
     }
 
+    // --- Province selection with memory ---
     function renderProvinceSelect(provinces, type, dataArr) {
       let provinceContainer = document.getElementById('province-select-container');
       provinceContainer.innerHTML = '';
@@ -308,23 +316,31 @@
         option.textContent = prov;
         select.appendChild(option);
       });
+
+      // Try to preserve last province selection if it exists
+      let selectedProvinceIndex = 0;
+      if (lastSelectedProvince && provinces.includes(lastSelectedProvince)) {
+        selectedProvinceIndex = provinces.indexOf(lastSelectedProvince);
+      } else {
+        // Optionally, auto-select Formosa if present
+        let formosaIdx = provinces.findIndex(p => p.trim().toLowerCase() === 'formosa');
+        if (formosaIdx !== -1) selectedProvinceIndex = formosaIdx;
+      }
+      select.selectedIndex = selectedProvinceIndex;
+      lastSelectedProvince = provinces[selectedProvinceIndex];
+
       select.onchange = function() {
+        lastSelectedProvince = this.value;
+        lastSelectedDepartment = null; // Reset department when province changes
         renderDepartmentSelect(this.value, type, dataArr);
       };
       provinceContainer.appendChild(label);
       provinceContainer.appendChild(select);
 
-      // Select Formosa if present, else first
-      let formosaIdx = provinces.findIndex(p => p.trim().toLowerCase() === 'formosa');
-      if (formosaIdx !== -1) {
-        select.selectedIndex = formosaIdx;
-        renderDepartmentSelect(provinces[formosaIdx], type, dataArr);
-      } else {
-        select.selectedIndex = 0;
-        renderDepartmentSelect(provinces[0], type, dataArr);
-      }
+      renderDepartmentSelect(lastSelectedProvince, type, dataArr);
     }
 
+    // --- Department selection with memory ---
     function renderDepartmentSelect(province, type, dataArr) {
       let departmentContainer = document.getElementById('department-select-container');
       departmentContainer.innerHTML = '';
@@ -362,14 +378,22 @@
         select.appendChild(option);
       });
 
+      // Try to preserve last department selection if it exists
+      let selectedDepartmentIndex = 0;
+      if (lastSelectedDepartment && departments.includes(lastSelectedDepartment)) {
+        selectedDepartmentIndex = departments.indexOf(lastSelectedDepartment) + 1; // +1 for 'Todos' option
+      }
+      select.selectedIndex = selectedDepartmentIndex;
+      lastSelectedDepartment = select.value;
+
       select.onchange = function() {
+        lastSelectedDepartment = this.value;
         drawProvinceMap(province, this.value, type, dataArr);
       };
       departmentContainer.appendChild(label);
       departmentContainer.appendChild(select);
 
-      select.selectedIndex = 0;
-      drawProvinceMap(province, '', type, dataArr);
+      drawProvinceMap(province, select.value, type, dataArr);
     }
 
     function drawProvinceMap(province, department, type, dataArr) {
@@ -378,21 +402,26 @@
       lastClickedMarker = null;
       lastHoveredMarker = null;
 
-      // Find the department column dynamically
-      let deptCol = Object.keys(dataArr[0] || {}).find(
-        k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
-      );
-
-      let filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
-      if (deptCol && department && department !== '') {
-        filteredData = filteredData.filter(r => r[deptCol] === department);
-      }
-
-      // For Floods, apply incidence filter
+      let filteredData;
       if (type === "Floods") {
+        let deptCol = Object.keys(dataArr[0] || {}).find(
+          k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
+        );
+        filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
+        if (deptCol && department && department !== '') {
+          filteredData = filteredData.filter(r => r[deptCol] === department);
+        }
         const checked = Array.from(document.querySelectorAll('#flood-filters input[name="incidence"]:checked')).map(i => i.value);
         if (currentFloodIncidenceKey && checked.length) {
           filteredData = filteredData.filter(row => checked.includes(row[currentFloodIncidenceKey]));
+        }
+      } else {
+        let deptCol = Object.keys(dataArr[0] || {}).find(
+          k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
+        );
+        filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
+        if (deptCol && department && department !== '') {
+          filteredData = filteredData.filter(r => r[deptCol] === department);
         }
       }
 
@@ -401,29 +430,43 @@
         let lat = parseFloat(row['Latitud del centroide'] || row['latitude'] || row['lat']);
         let lng = parseFloat(row['Longitud del centroide'] || row['longitude'] || row['lon']);
         if (!isNaN(lat) && !isNaN(lng)) {
-          let style = (type === "Floods" && currentFloodIncidenceKey)
-            ? {
-                radius: 6,
-                color: getFloodColor(row[currentFloodIncidenceKey]),
-                fillColor: getFloodColor(row[currentFloodIncidenceKey]),
-                fillOpacity: 0.85,
-                weight: 1
-              }
-            : defaultStyle;
-          let highlight = (type === "Floods" && currentFloodIncidenceKey)
-            ? {
-                radius: 7,
-                color: '#fc0004',
-                fillColor: '#fc0004',
-                fillOpacity: 1,
-                weight: 2
-              }
-            : highlightStyle;
+          let style, highlight;
+          if (type === "Floods" && currentFloodIncidenceKey) {
+            style = {
+              radius: 6,
+              color: getFloodColor(row[currentFloodIncidenceKey]),
+              fillColor: getFloodColor(row[currentFloodIncidenceKey]),
+              fillOpacity: 0.85,
+              weight: 1
+            };
+            highlight = {
+              radius: 7,
+              color: '#fc0004',
+              fillColor: '#fc0004',
+              fillOpacity: 1,
+              weight: 2
+            };
+          } else {
+            style = {
+              radius: 6,
+              color: '#3388ff',
+              fillColor: '#3388ff',
+              fillOpacity: 0.8,
+              weight: 1
+            };
+            highlight = {
+              radius: 7,
+              color: '#fc0004',
+              fillColor: '#fc0004',
+              fillOpacity: 1,
+              weight: 2
+            };
+          }
           let circle = L.circleMarker([lat, lng], style)
             .addTo(dotsLayer)
             .on('click', function(e) {
               if (lastClickedMarker && lastClickedMarker !== this) {
-                lastClickedMarker.setStyle(lastClickedMarker._floodLevelStyle || defaultStyle);
+                lastClickedMarker.setStyle(lastClickedMarker._floodLevelStyle || style);
               }
               this.setStyle(highlight);
               this._floodLevelStyle = style;
@@ -434,12 +477,16 @@
           bounds.push([lat, lng]);
         }
       });
+
       if (bounds.length > 0) {
-        map.fitBounds(bounds);
+        const latLngBounds = L.latLngBounds(bounds);
+        const zoomOutDelta = 3; // Increase to zoom out more, decrease to zoom out less
+        const targetZoom = map.getBoundsZoom(latLngBounds) - zoomOutDelta;
+        const center = latLngBounds.getCenter();
+        map.setView(center, targetZoom);
       }
     }
 
-    // Floods filter triggers redraw
     function drawFloodMap() {
       // Use current province/department selection
       let provinceSelect = document.getElementById(provinceSelectId);

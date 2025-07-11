@@ -10,4 +10,4 @@ import streamlit.components.v1 as components
 with open("new_map.html", "r", encoding="utf-8") as f:
     html_content = f.read()
 
-components.html(html_content, height=700, width=1200, scrolling=False)
+components.html(html_content, height=600, width=1200, scrolling=False)

@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Mapa de Argentina - CSV Dots by Year (Floods & Labour Integrated)</title>
-  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
@@ -37,11 +37,16 @@
       border-bottom: 2px solid #bbb;
     }
     #main-layout { display: flex; flex-direction: row; height: calc(100vh - 55px); width: 100vw; position: relative; }
-    #year-panel { width: 150px; min-width: 110px; background: #fff; border-right: 1px solid #eee; box-sizing: border-box; z-index: 1002; display: flex; flex-direction: column; align-items: stretch; padding: 25px 10px 10px 10px; position: relative; height: 100%; }
+    #year-panel { width: 170px; min-width: 110px; background: #fff; border-right: 1px solid #eee; box-sizing: border-box; z-index: 1002; display: flex; flex-direction: column; align-items: stretch; padding: 25px 10px 10px 10px; position: relative; height: 100%; }
+    #province-select-container { margin-bottom: 0; }
+    #department-select-container { margin-bottom: 16px; }
+    #province-select, #department-select {
+      width: 100%; padding: 5px; font-size: 15px; margin-bottom: 10px;
+    }
     #year-panel h4 { margin: 0 0 15px 0; color: #800000; font-size: 17px; font-weight: 600; text-align: left; }
     #file-controls { display: flex; flex-direction: column; gap: 8px; width: 100%; }
     #flood-filters { margin-top: 18px; margin-bottom: 10px; display: none; }
-    #flood-filters label { font-weight: bold; color: #222; margin-bottom: 5px; display: block; }
+    #flood-filters label { font-weight: bold; color: #800000; margin-bottom: 5px; display: block; }
     #flood-filters input[type="checkbox"] { margin-right: 4px; }
     #map { flex: 1 1 0%; position: relative; height: 100%; width: 100%; z-index: 1; }
     #info-panel { display: none; position: relative; width: 370px; min-width: 180px; height: 100%; overflow-y: auto; background: rgba(255,255,255,0.98); border-left: 1px solid #eee; z-index: 9999; padding: 30px 18px 18px 18px; font-family: Arial, sans-serif; transition: box-shadow 0.2s; box-shadow: 0 0 24px rgba(0,0,0,0.10); }
@@ -65,11 +70,13 @@
   <div id="folder-controls"></div>
   <div id="main-layout">
     <div id="year-panel">
+      <div id="province-select-container"></div>
+      <div id="department-select-container"></div>
       <h4>Año</h4>
       <div id="file-controls"></div>
       <div id="flood-filters">
         <label>Incidence Level:</label>
-        <input type="checkbox" name="incidence" value="1" onchange="drawFloodMap()"> Live<br>
+        <input type="checkbox" name="incidence" value="1" onchange="drawFloodMap()"> Slight<br>
         <input type="checkbox" name="incidence" value="2" onchange="drawFloodMap()"> Moderate<br>
         <input type="checkbox" name="incidence" value="3" onchange="drawFloodMap()"> Criticism<br>
       </div>
@@ -100,7 +107,26 @@
         "app/static/Floods/2001.csv",
         "app/static/Floods/2010.csv",
         "app/static/Floods/2024.csv"
-      ]
+      ],
+      "Socio-Economic": [
+        "app/static/Socio-Economic/2010.csv",
+      ],
+      "People Indicators": [
+        "app/static/People Indicators/1991.csv",
+        "app/static/People Indicators/2001.csv",
+        "app/static/People Indicators/2010.csv",
+        "app/static/People Indicators/2022.csv",
+      ],
+      "Household": [
+        "app/static/Household/1991.csv",
+        "app/static/Household/2001.csv",
+        "app/static/Household/2010.csv",
+        "app/static/Household/2022.csv",
+      ],
+      "Labour": [
+        "app/static/Labour/2010.csv",
+        "app/static/Labour/2022.csv",
+      ],
     };
 
     const defaultStyle = {
@@ -132,6 +158,11 @@
     let currentFile = null;
     let currentFloodIncidenceKey = null;
     let currentFloodData = [];
+
+    // Province/Department selection data
+    const provinceSelectId = 'province-select';
+    const departmentSelectId = 'department-select';
+    let allData = {};
 
     var map = L.map('map').setView([-38.4161, -63.6167], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -168,27 +199,19 @@
         btn.onclick = () => {
           currentFile = filePath;
           renderFileButtons(folder);
-          if (folder === "Floods") {
-            loadFloodCSV(filePath);
-          } else if (folder === "Labour and Social") {
-            loadLabourCSV(filePath);
-          } else {
-            loadCSV(filePath);
-          }
+          loadProvinceCSV(filePath, folder);
         };
         fileDiv.appendChild(btn);
       });
       document.getElementById('flood-filters').style.display = (folder === "Floods") ? "block" : "none";
+      if (!Object.keys(folderStructure).includes(folder)) {
+        removeProvinceSelect();
+        removeDepartmentSelect();
+      }
       if(!currentFile && folderStructure[folder].length > 0) {
         currentFile = folderStructure[folder][0];
         renderFileButtons(folder);
-        if (folder === "Floods") {
-          loadFloodCSV(currentFile);
-        } else if (folder === "Labour and Social") {
-          loadLabourCSV(currentFile);
-        } else {
-          loadCSV(currentFile);
-        }
+        loadProvinceCSV(currentFile, folder);
       }
     }
 
@@ -214,60 +237,23 @@
       }
     }
 
-    // --- General CSV loader (Informal settlements, Vital stats) ---
-    function loadCSV(filename) {
+    function removeProvinceSelect() {
+      document.getElementById('province-select-container').innerHTML = '';
       dotsLayer.clearLayers();
       document.getElementById('info-panel').style.display = 'none';
-      lastClickedMarker = null;
-      lastHoveredMarker = null;
-      fetch(filename)
-        .then(response => {
-          if (!response.ok) throw new Error("File not found: " + filename);
-          return response.text();
-        })
-        .then(csvText => {
-          Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            complete: function(results) {
-              var data = results.data;
-              var bounds = [];
-              data.forEach(function(row) {
-                var lat = parseFloat(row['Latitud del centroide'] || row['latitude'] || row['lat']);
-                var lng = parseFloat(row['Longitud del centroide'] || row['longitude'] || row['lon']);
-                if (!isNaN(lat) && !isNaN(lng)) {
-                  var circle = L.circleMarker([lat, lng], defaultStyle)
-                    .addTo(dotsLayer)
-                    .on('click', function(e) {
-                      if (lastClickedMarker && lastClickedMarker !== this) {
-                        lastClickedMarker.setStyle(defaultStyle);
-                      }
-                      this.setStyle(highlightStyle);
-                      lastClickedMarker = this;
-                      showInfoPanel(row);
-                    });
-                  bounds.push([lat, lng]);
-                }
-              });
-              if (bounds.length > 0) {
-                map.fitBounds(bounds);
-              }
-            }
-          });
-        })
-        .catch(error => {
-          dotsLayer.clearLayers();
-          alert("Error loading file: " + filename);
-        });
+    }
+    function removeDepartmentSelect() {
+      document.getElementById('department-select-container').innerHTML = '';
     }
 
-    // --- Floods CSV loader (uses only Latitud del centroide/Longitud del centroide) ---
-    function loadFloodCSV(file) {
+    function loadProvinceCSV(file, type) {
       dotsLayer.clearLayers();
       document.getElementById('info-panel').style.display = 'none';
       lastClickedMarker = null;
       lastHoveredMarker = null;
-      document.querySelectorAll('#flood-filters input[type="checkbox"]').forEach(cb => cb.checked = false);
+      removeProvinceSelect();
+      removeDepartmentSelect();
+
       fetch(file)
         .then(response => {
           if (!response.ok) throw new Error("File not found: " + file);
@@ -278,10 +264,16 @@
             header: true,
             skipEmptyLines: true,
             complete: function(results) {
-              currentFloodData = results.data;
-              currentFloodIncidenceKey = results.meta.fields.find(h => h.toLowerCase().includes("nivel de incidencia"));
-              document.getElementById('flood-filters').style.display = currentFloodIncidenceKey ? "block" : "none";
-              drawFloodMap();
+              let data = results.data;
+              allData[type] = data;
+              let provinces = [...new Set(data.map(r => r['Nombre de provincia']).filter(p => p))].sort();
+              renderProvinceSelect(provinces, type, data);
+              if (type === "Floods") {
+                // For floods, also store the data for incidence filtering
+                currentFloodData = data;
+                currentFloodIncidenceKey = results.meta.fields.find(h => h.toLowerCase().includes("nivel de incidencia"));
+                document.getElementById('flood-filters').style.display = currentFloodIncidenceKey ? "block" : "none";
+              }
             }
           });
         })
@@ -291,95 +283,170 @@
         });
     }
 
-    function drawFloodMap() {
-      dotsLayer.clearLayers();
-      document.getElementById('info-panel').style.display = 'none';
-      lastClickedMarker = null;
-      lastHoveredMarker = null;
-      const checked = Array.from(document.querySelectorAll('#flood-filters input[name="incidence"]:checked')).map(i => i.value);
-      var bounds = [];
-      currentFloodData.forEach(row => {
-        const lat = parseFloat(row["Latitud del centroide"]);
-        const lon = parseFloat(row["Longitud del centroide"]);
-        if (isNaN(lat) || isNaN(lon)) return;
-        const level = currentFloodIncidenceKey ? row[currentFloodIncidenceKey] : null;
-        if (currentFloodIncidenceKey && checked.length && !checked.includes(level)) return;
-        const style = {
-          radius: 6,
-          color: getFloodColor(level),
-          fillColor: getFloodColor(level),
-          fillOpacity: 0.85,
-          weight: 1
-        };
-        const highlight = {
-          radius: 7,
-          color: '#fc0004',
-          fillColor: '#fc0004',
-          fillOpacity: 1,
-          weight: 2
-        };
-        var circle = L.circleMarker([lat, lon], style)
-          .addTo(dotsLayer)
-          .on('click', function(e) {
-            if (lastClickedMarker && lastClickedMarker !== this) {
-              lastClickedMarker.setStyle(lastClickedMarker._floodLevelStyle || style);
-            }
-            this.setStyle(highlight);
-            this._floodLevelStyle = style; // save for unhighlight
-            lastClickedMarker = this;
-            showInfoPanel(row);
-          });
-        circle._floodLevelStyle = style;
-        bounds.push([lat, lon]);
+    function renderProvinceSelect(provinces, type, dataArr) {
+      let provinceContainer = document.getElementById('province-select-container');
+      provinceContainer.innerHTML = '';
+      let departmentContainer = document.getElementById('department-select-container');
+      departmentContainer.innerHTML = '';
+      if (!provinces || provinces.length === 0) return;
+
+      let label = document.createElement('label');
+      label.setAttribute('for', provinceSelectId);
+      label.textContent = 'Provincia:';
+      label.style.fontWeight = 'bold';
+      label.style.color = '#800000';
+
+      let select = document.createElement('select');
+      select.id = provinceSelectId;
+      select.style.marginBottom = '8px';
+      select.style.marginTop = '2px';
+      select.style.width = '100%';
+      select.style.fontSize = '15px';
+      provinces.forEach(prov => {
+        let option = document.createElement('option');
+        option.value = prov;
+        option.textContent = prov;
+        select.appendChild(option);
       });
-      if (bounds.length > 0) map.fitBounds(bounds);
+      select.onchange = function() {
+        renderDepartmentSelect(this.value, type, dataArr);
+      };
+      provinceContainer.appendChild(label);
+      provinceContainer.appendChild(select);
+
+      // Select Formosa if present, else first
+      let formosaIdx = provinces.findIndex(p => p.trim().toLowerCase() === 'formosa');
+      if (formosaIdx !== -1) {
+        select.selectedIndex = formosaIdx;
+        renderDepartmentSelect(provinces[formosaIdx], type, dataArr);
+      } else {
+        select.selectedIndex = 0;
+        renderDepartmentSelect(provinces[0], type, dataArr);
+      }
     }
 
-    // --- Labour and Social CSV loader (uses only Latitud del centroide/Longitud del centroide) ---
-    function loadLabourCSV(file) {
+    function renderDepartmentSelect(province, type, dataArr) {
+      let departmentContainer = document.getElementById('department-select-container');
+      departmentContainer.innerHTML = '';
+
+      // Dynamic department column detection
+      let deptCol = Object.keys(dataArr[0] || {}).find(
+        k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
+      );
+      let departments = deptCol
+        ? [...new Set(dataArr.filter(r => r['Nombre de provincia'] === province).map(r => r[deptCol]).filter(d => d))].sort()
+        : [];
+
+      let label = document.createElement('label');
+      label.setAttribute('for', departmentSelectId);
+      label.textContent = 'Departament:';
+      label.style.fontWeight = 'bold';
+      label.style.color = '#800000';
+
+      let select = document.createElement('select');
+      select.id = departmentSelectId;
+      select.style.marginBottom = '8px';
+      select.style.marginTop = '2px';
+      select.style.width = '100%';
+      select.style.fontSize = '15px';
+
+      let allOption = document.createElement('option');
+      allOption.value = '';
+      allOption.textContent = 'Todos';
+      select.appendChild(allOption);
+
+      departments.forEach(dept => {
+        let option = document.createElement('option');
+        option.value = dept;
+        option.textContent = dept;
+        select.appendChild(option);
+      });
+
+      select.onchange = function() {
+        drawProvinceMap(province, this.value, type, dataArr);
+      };
+      departmentContainer.appendChild(label);
+      departmentContainer.appendChild(select);
+
+      select.selectedIndex = 0;
+      drawProvinceMap(province, '', type, dataArr);
+    }
+
+    function drawProvinceMap(province, department, type, dataArr) {
       dotsLayer.clearLayers();
       document.getElementById('info-panel').style.display = 'none';
       lastClickedMarker = null;
       lastHoveredMarker = null;
-      fetch(file)
-        .then(response => {
-          if (!response.ok) throw new Error("File not found: " + file);
-          return response.text();
-        })
-        .then(csvText => {
-          Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            complete: function(results) {
-              var data = results.data;
-              var bounds = [];
-              data.forEach(function(row) {
-                var lat = parseFloat(row['Latitud del centroide']);
-                var lng = parseFloat(row['Longitud del centroide']);
-                if (!isNaN(lat) && !isNaN(lng)) {
-                  var circle = L.circleMarker([lat, lng], defaultStyle)
-                    .addTo(dotsLayer)
-                    .on('click', function(e) {
-                      if (lastClickedMarker && lastClickedMarker !== this) {
-                        lastClickedMarker.setStyle(defaultStyle);
-                      }
-                      this.setStyle(highlightStyle);
-                      lastClickedMarker = this;
-                      showInfoPanel(row);
-                    });
-                  bounds.push([lat, lng]);
-                }
-              });
-              if (bounds.length > 0) {
-                map.fitBounds(bounds);
+
+      // Find the department column dynamically
+      let deptCol = Object.keys(dataArr[0] || {}).find(
+        k => k && k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nombre de d')
+      );
+
+      let filteredData = dataArr.filter(r => r['Nombre de provincia'] === province);
+      if (deptCol && department && department !== '') {
+        filteredData = filteredData.filter(r => r[deptCol] === department);
+      }
+
+      // For Floods, apply incidence filter
+      if (type === "Floods") {
+        const checked = Array.from(document.querySelectorAll('#flood-filters input[name="incidence"]:checked')).map(i => i.value);
+        if (currentFloodIncidenceKey && checked.length) {
+          filteredData = filteredData.filter(row => checked.includes(row[currentFloodIncidenceKey]));
+        }
+      }
+
+      let bounds = [];
+      filteredData.forEach(row => {
+        let lat = parseFloat(row['Latitud del centroide'] || row['latitude'] || row['lat']);
+        let lng = parseFloat(row['Longitud del centroide'] || row['longitude'] || row['lon']);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          let style = (type === "Floods" && currentFloodIncidenceKey)
+            ? {
+                radius: 6,
+                color: getFloodColor(row[currentFloodIncidenceKey]),
+                fillColor: getFloodColor(row[currentFloodIncidenceKey]),
+                fillOpacity: 0.85,
+                weight: 1
               }
-            }
-          });
-        })
-        .catch(error => {
-          dotsLayer.clearLayers();
-          alert("Error loading file: " + file);
-        });
+            : defaultStyle;
+          let highlight = (type === "Floods" && currentFloodIncidenceKey)
+            ? {
+                radius: 7,
+                color: '#fc0004',
+                fillColor: '#fc0004',
+                fillOpacity: 1,
+                weight: 2
+              }
+            : highlightStyle;
+          let circle = L.circleMarker([lat, lng], style)
+            .addTo(dotsLayer)
+            .on('click', function(e) {
+              if (lastClickedMarker && lastClickedMarker !== this) {
+                lastClickedMarker.setStyle(lastClickedMarker._floodLevelStyle || defaultStyle);
+              }
+              this.setStyle(highlight);
+              this._floodLevelStyle = style;
+              lastClickedMarker = this;
+              showInfoPanel(row);
+            });
+          circle._floodLevelStyle = style;
+          bounds.push([lat, lng]);
+        }
+      });
+      if (bounds.length > 0) {
+        map.fitBounds(bounds);
+      }
+    }
+
+    // Floods filter triggers redraw
+    function drawFloodMap() {
+      // Use current province/department selection
+      let provinceSelect = document.getElementById(provinceSelectId);
+      let departmentSelect = document.getElementById(departmentSelectId);
+      let province = provinceSelect ? provinceSelect.value : '';
+      let department = departmentSelect ? departmentSelect.value : '';
+      drawProvinceMap(province, department, "Floods", allData["Floods"] || []);
     }
 
     window.onload = function() {
